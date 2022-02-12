@@ -1,0 +1,130 @@
+---
+title: "STAA 566 Assignment 2"
+author: "Kyle Gahagan"
+output: html_document
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+---
+I previously investigated how a movie's inflation-adjusted budget relates to its reception by the general audience (IMDb) and film critics (Metacritic). We saw that for the relationship between audience score and budget looks similar to a normal distribution. From 4 to 6.5 IMDb score you see a gradual increase in budget, but after around 7 you start to see the average budget start to decrease. For critic score the pattern in similar but much less pronounced in the center of critic scores. While this is a useful way to visualize, someone may want to know exactly what's going on at some of the more extreme points in budget and score. This time we will focus solely on critic score. By using ggplotly, we can add interactivity to this graph to label movie title.
+
+As before, I will use two data sets from Kaggle. The first data set contains details on thousands of movies from IMDb in the last 40 years (1980-2020). The data can be accessed here: https://www.kaggle.com/danielgrijalvas/movies. In conjunction with the IMDb data set, I will also use a data set from Metacritic, one of the most popular websites for seeing critics' numerical scores of movies. This data set is referenced here: https://www.kaggle.com/miazhx/metacritic-movie-reviews. 
+
+First I will read in both data frames and use only the necessary columns from each one. I will then merge them by movie title, adjust the budget for inflation, and filter out any missing values: 
+
+```{r message = FALSE, warning = FALSE, results = 'hide'}
+# Use readr package to read in imdb and metacritic csv
+library(readr)
+imdb_data <- read_csv("imdb.csv")
+metacritic_data <- read_csv("metacritic.csv")
+
+# Use dplyr to select relevant columns and rename them for the imdb data frame
+library(dplyr)
+imdb_data <-  imdb_data %>%
+  select(name, year, score, budget) %>%
+  rename(title = name)
+
+# Use dplyr to select relevant columns and rename them for the meta data frame
+metacritic_data <-  metacritic_data %>%
+  select(movie_title, metascore) %>%
+  rename(title = movie_title)
+
+# Merge budget data with metacritic data
+# Name the merged data frame master_data
+master_data <- merge(imdb_data, metacritic_data, by = "title", all = T)
+
+# Drop duplicate movie titles so we can adjust for inflation
+master_data <- master_data[!duplicated(master_data$title), ]
+
+# Use priceR package to adjust movie budgets for inflation up to 2020
+# Note: We use 2020 since this was the last year for the IMDb dataset
+library(priceR)
+master_data$budget_adj <- adjust_for_inflation(
+  price = master_data$budget, 
+  from_date = master_data$year, 
+  country = "US", 
+  to_date = 2020)
+
+# Remove old budget variable and year now that we adjusted for inflation
+# Remove score since we are now only looking at metacritic score
+master_data <- master_data %>%
+  select(-budget, -year, -score)
+
+# Filter out NAs in title, metascore, and budget
+master_data <- master_data %>%
+  filter(!is.na(title)) %>%
+  filter(!is.na(metascore)) %>%
+  filter(!is.na(budget_adj))
+```
+
+Now that my data is ready for plotting, I will create one scatter plot: metacritic_score vs. inflation-adjusted budget 
+
+```{r message = FALSE, warning = FALSE, fig.width = 9, fig.height = 6}
+# Map the data
+# This time time add labels for title and year
+# Also add a text object to make formatting tooltip easier
+library(ggplot2)
+plot_meta_budget <- ggplot(
+  data = master_data, 
+  mapping = aes(
+    x = metascore, 
+    y = budget_adj,
+    label = title, 
+    text = paste(
+        "Title:", title,
+        "\nMetascore:", metascore,
+        "\nBudget:", round(budget_adj / 1000000, digits = 0), "M")))
+
+# Create a scatterplot with appropriate parameters
+plot_meta_budget <- plot_meta_budget +
+  geom_point(
+    alpha = .8, 
+    shape = 21, 
+    size = 2, 
+    fill = "light blue", 
+    color = "black", 
+    position = position_jitter(width = .05))
+
+# Use Nate Silver's fivethirtyeight theme: metacritic
+library(ggthemes)
+plot_meta_budget <- plot_meta_budget +
+  theme_fivethirtyeight()
+
+# Format axes: metacritic
+library(scales)
+plot_meta_budget <- plot_meta_budget +
+  scale_x_continuous(
+    breaks = seq(0, 100, by = 10), 
+    limits = c(0, 102), 
+    expand = c(0, 0)) +
+  scale_y_continuous(
+    breaks = seq(0, 400000000, by = 50000000),
+    limits = c(0, 400000000),
+    expand = c(0, 0),
+    labels = unit_format(unit = "M", scale = 1e-6))
+
+# Label axes
+plot_meta_budget <- plot_meta_budget +
+  xlab("Metacritic Score") +
+  ylab("Inflation-Adjusted Budget ($USD)") +
+  ggtitle("Inflation-Adjusted Movie Budget by Metacritic Score")
+
+# Adjust appearance of axis labels: metacritic
+plot_meta_budget <- plot_meta_budget +
+  theme(axis.title.x = element_text(size = 15, vjust = 0)) +
+  theme(axis.title.y = element_text(size = 15, vjust = 1)) +
+  theme(plot.title = element_text(size = 15, hjust = 0.5, vjust = 1))
+
+# Preview static plot
+plot_meta_budget
+```
+
+Add ggplotly functionality and add tooltip label for movie title:
+
+```{r message = FALSE, warning = FALSE, fig.width = 9, fig.height = 6}
+# Use plotly package and ggplotly function to make the figure dynamic
+library(plotly)
+ggplotly(plot_meta_budget, tooltip = "text")
+```
